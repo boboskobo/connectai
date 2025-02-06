@@ -1,25 +1,75 @@
 import express from 'express';
 import bodyParser from 'body-parser';
-import RockGHLIntegration from './rock-ghl-integration.js';
-import { logInfo, logError } from './logger.js';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import webhookHandler from './webhook-handler.js';
+import logger from './core/logger.js';
 
+// Load environment variables
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Initialize Express app
 const app = express();
+
+// Security middleware
+app.use(helmet());
+app.use(cors());
+app.use(morgan('combined'));
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use('/webhook', limiter);
+
+// Body parsing middleware
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Serve static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Webhook endpoint
-app.post('/api/webhook', async (req, res) => {
+app.post('/webhook/ghl', async (req, res) => {
     try {
-        await logInfo('Received webhook:', req.body);
-        
-        const integration = new RockGHLIntegration();
-        const result = await integration.handleContact(req.body);
-        
-        res.json({ success: true, data: result });
+        const signature = req.headers['x-ghl-signature'];
+        const result = await webhookHandler.handleWebhook(req.body, signature);
+        res.status(200).json(result);
     } catch (error) {
-        await logError(error, 'webhook');
-        res.status(500).json({ success: false, error: error.message });
+        logger.error('Webhook processing failed', { error: error.stack });
+        res.status(500).json({ 
+            error: 'Internal server error',
+            message: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+    logger.error('Unhandled error', { error: err.stack });
+    res.status(500).json({ 
+        error: 'Something went wrong!',
+        message: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+// Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`)); 
+app.listen(PORT, () => {
+    logger.info(`Server is running on port ${PORT}`);
+    logger.info(`Environment: ${process.env.NODE_ENV}`);
+}); 
