@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CONNECT Rock RMS Integration</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 20px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .status.error {
+            background: #ffebee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CONNECT Rock RMS Integration</h1>
+        <div class="status" id="status">
+            Checking system status...
+        </div>
+    </div>
+    <script>
+        async function checkStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerHTML = `
+                    Status: ${data.status}<br>
+                    Version: ${data.version}<br>
+                    Environment: ${data.environment}<br>
+                    Last Check: ${data.timestamp}
+                `;
+                statusDiv.className = 'status ' + (data.status === 'ok' ? '' : 'error');
+            } catch (error) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.innerHTML = 'Error connecting to server';
+                statusDiv.className = 'status error';
+            }
+        }
+        
+        // Check status immediately and every 30 seconds
+        checkStatus();
+        setInterval(checkStatus, 30000);
+    </script>
+</body>
+</html> 

@@ -1,0 +1,42 @@
+{
+  "connectionStatusId": 1949,
+  "campuses": [
+    {
+      "id": 2,
+      "name": "Lafayette Campus",
+      "isActive": true
+    },
+    {
+      "id": 3,
+      "name": "West Campus",
+      "isActive": true
+    },
+    {
+      "id": 4,
+      "name": "Denver Campus",
+      "isActive": true
+    },
+    {
+      "id": 5,
+      "name": "Aurora Campus",
+      "isActive": true
+    },
+    {
+      "id": 6,
+      "name": "Longmont Campus",
+      "isActive": true
+    },
+    {
+      "id": 8,
+      "name": "Online Campus",
+      "isActive": true
+    },
+    {
+      "id": 9,
+      "name": "Brighton Campus",
+      "isActive": false
+    }
+  ],
+  "apiKey": "orGdK9QLAQBhFVg0581VuLB3",
+  "baseUrl": "https://devrock.flatironschurch.com/api"
+}
