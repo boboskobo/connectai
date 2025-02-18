@@ -42,11 +42,32 @@ class ChurchConfigService {
     }
 
     /**
+     * Validate church configuration for verification
+     */
+    async validateVerificationConfig(config) {
+        const requiredFields = [
+            'rockRmsUrl',
+            'apiKey'
+        ];
+
+        const missing = requiredFields.filter(field => !config[field]);
+        if (missing.length > 0) {
+            throw new Error(`Missing required verification fields: ${missing.join(', ')}`);
+        }
+
+        return true;
+    }
+
+    /**
      * Save church configuration
      */
-    async saveConfig(churchId, config) {
+    async saveConfig(churchId, config, isVerification = false) {
         try {
-            await this.validateConfig(config);
+            if (isVerification) {
+                await this.validateVerificationConfig(config);
+            } else {
+                await this.validateConfig(config);
+            }
             
             const configPath = path.join(this.configDir, `${churchId}.json`);
             await fs.writeFile(configPath, JSON.stringify(config, null, 2));

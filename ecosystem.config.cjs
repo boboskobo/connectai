@@ -1,3 +1,11 @@
+const dotenv = require('dotenv');
+
+// Load development environment variables
+const devEnv = dotenv.config({ path: '.env.development' }).parsed;
+
+// Load production environment variables
+const prodEnv = dotenv.config({ path: '.env' }).parsed;
+
 module.exports = {
   apps: [{
     name: 'connect-rock-integration',
@@ -8,13 +16,11 @@ module.exports = {
     watch: false,
     max_memory_restart: '1G',
     env: {
-      NODE_ENV: 'development',
-      PORT: 3000,
-      CORS_ORIGIN: '*',
-      RATE_LIMIT_WINDOW_MS: 900000,
-      RATE_LIMIT_MAX_REQUESTS: 100
+      ...devEnv,
+      NODE_ENV: 'development'
     },
     env_production: {
+      ...prodEnv,
       NODE_ENV: 'production'
     },
     error_file: 'logs/pm2/error.log',
@@ -23,9 +29,6 @@ module.exports = {
     log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     merge_logs: true,
     
-    // Load .env file
-    env_file: '.env',
-    
     // Ensure graceful shutdown
     kill_timeout: 5000,
     wait_ready: true,
@@ -33,6 +36,6 @@ module.exports = {
     
     // Health monitoring
     exp_backoff_restart_delay: 100,
-    max_restarts: 10
+    max_restarts: 10,
   }]
 }; 

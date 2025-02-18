@@ -6,6 +6,9 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
+import fs from 'fs';
+import axios from 'axios';
+import crypto from 'crypto';
 
 import RockApiClient from './integrations/rock/api.js';
 import GHLWebhookHandler from './integrations/ghl/webhook.js';
@@ -15,7 +18,7 @@ import logger, { logError, logInfo } from './utils/logger.js';
 import { validateEnv } from './utils/validate-env.js';
 import { metrics, getMetrics } from './utils/metrics.js';
 import adminRoutes from './routes/admin.js';
-import ghlOAuth from './services/ghl-oauth.js';
+import ghlAuth from './services/ghl-auth.js';
 
 // Load environment variables
 dotenv.config();
@@ -34,15 +37,7 @@ const startTime = new Date();
 
 // Security middleware
 app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'https:'],
-            connectSrc: ["'self'"]
-        }
-    }
+    contentSecurityPolicy: false
 }));
 
 // CORS configuration
@@ -60,6 +55,44 @@ app.use('/webhook', limiter);
 // Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Debug logging middleware
+app.use((req, res, next) => {
+    console.log('Incoming request:', {
+        method: req.method,
+        path: req.path,
+        headers: req.headers
+    });
+    next();
+});
+
+// Serve static files and handle ACME challenge
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Explicit ACME challenge handling
+app.get('/.well-known/acme-challenge/:token', (req, res) => {
+    const token = req.params.token;
+    const challengePath = path.join(__dirname, '../.well-known/acme-challenge', token);
+    
+    logInfo('ACME challenge requested', { token, path: challengePath });
+    
+    try {
+        if (fs.existsSync(challengePath)) {
+            res.sendFile(challengePath);
+        } else {
+            logError('ACME challenge file not found', { token, path: challengePath });
+            res.status(404).send('Challenge file not found');
+        }
+    } catch (error) {
+        logError('Error serving ACME challenge', { token, error });
+        res.status(500).send('Error serving challenge file');
+    }
+});
+
+// Root route
+app.get('/', (req, res) => {
+    res.send('ConnectAI API Server Running');
+});
 
 // Enhanced health check endpoint
 app.get('/health', async (req, res) => {
@@ -181,50 +214,163 @@ app.post('/webhook/ghl', async (req, res) => {
     }
 });
 
-// OAuth callback route
-app.get('/callback', async (req, res) => {
+// Validate GHL webhook signature
+function validateGHLSignature(signature, payload, secret) {
     try {
-        const { code } = req.query;
-        if (!code) {
-            throw new Error('No authorization code received');
+        // Create HMAC-SHA256 hash of the request body using the secret
+        const computedHash = crypto
+            .createHmac('sha256', secret)
+            .update(JSON.stringify(payload))
+            .digest('hex');
+        
+        // Compare the computed hash with the provided signature
+        return crypto.timingSafeEqual(
+            Buffer.from(signature),
+            Buffer.from(computedHash)
+        );
+    } catch (error) {
+        logError('Signature validation failed', error);
+        return false;
+    }
+}
+
+// Debug route to verify server is running
+app.get('/debug', (req, res) => {
+    res.json({
+        status: 'ok',
+        routes: app._router.stack
+            .filter(r => r.route)
+            .map(r => ({
+                path: r.route.path,
+                methods: Object.keys(r.route.methods)
+            }))
+    });
+});
+
+// Rock RMS verification endpoint
+app.post('/auth/rock-verify', async (req, res) => {
+    console.log('Verification request received:', {
+        body: req.body,
+        query: req.query,
+        headers: req.headers
+    });
+
+    try {
+        // 1. Validate GHL Signature
+        const signature = req.headers['x-ghl-signature'];
+        const timestamp = req.headers['x-ghl-timestamp'];
+        
+        await logInfo('Verification request headers', {
+            signature: signature ? 'present' : 'missing',
+            timestamp: timestamp || 'missing'
+        });
+
+        if (!signature) {
+            return res.status(401).json({
+                success: false,
+                error: 'Missing GHL signature'
+            });
         }
 
-        await logInfo('Received OAuth callback', { code });
+        // Validate the signature
+        const isValidSignature = validateGHLSignature(
+            signature,
+            req.body,
+            process.env.GHL_WEBHOOK_SECRET
+        );
 
-        // Exchange code for tokens
-        const tokens = await ghlOAuth.exchangeCodeForTokens(code);
-        
-        // Store tokens in church config
-        const churchConfig = {
-            churchName: `GHL Location ${tokens.locationId}`,
-            locationId: tokens.locationId,
-            companyId: tokens.companyId,
-            accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
-            tokenType: tokens.token_type,
-            expiresIn: tokens.expires_in
-        };
+        if (!isValidSignature) {
+            await logError('Invalid GHL signature', {
+                providedSignature: signature,
+                timestamp
+            });
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid signature'
+            });
+        }
 
-        // Save the config
-        await churchConfig.saveConfig(tokens.locationId, churchConfig);
+        // 2. Extract and validate required data
+        const {
+            apiKey,
+            rockRmsUrl,
+            locationId = req.query.locationId, // Try body first, then query
+            companyId = req.query.companyId    // Try body first, then query
+        } = req.body;
 
-        await logInfo('OAuth setup complete', { 
-            locationId: tokens.locationId,
-            companyId: tokens.companyId 
+        // Log request details (safely)
+        await logInfo('Rock RMS verification request', {
+            hasApiKey: !!apiKey,
+            rockRmsUrl,
+            locationId,
+            companyId,
+            timestamp
         });
 
-        res.status(200).json({ 
-            status: 'success',
-            message: 'OAuth setup complete',
-            locationId: tokens.locationId
+        // 3. Validate required fields
+        const missingFields = [];
+        if (!locationId) missingFields.push('locationId');
+        if (!companyId) missingFields.push('companyId');
+        if (!apiKey) missingFields.push('apiKey');
+        if (!rockRmsUrl) missingFields.push('rockRmsUrl');
+
+        if (missingFields.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: `Missing required fields: ${missingFields.join(', ')}`
+            });
+        }
+
+        // 4. Validate Rock RMS URL format
+        try {
+            const url = new URL(rockRmsUrl);
+            if (!url.protocol.startsWith('http')) {
+                throw new Error('Invalid protocol');
+            }
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid Rock RMS URL format. Must be a valid HTTPS URL.'
+            });
+        }
+
+        // 5. Create a unique configuration key
+        const configKey = `${companyId}:${locationId}`; // Using colon as separator for better readability
+
+        // 6. Store the configuration
+        await churchConfig.saveConfig(configKey, {
+            rockRmsUrl: rockRmsUrl.trim(),
+            apiKey,
+            locationId,
+            companyId,
+            lastVerified: new Date().toISOString(),
+            signature // Store for reference/debugging
+        }, true); // Use verification validation
+
+        // 7. Return success response
+        return res.status(200).json({
+            success: true,
+            message: 'Rock RMS connection verified successfully',
+            location: {
+                id: locationId,
+                companyId,
+                url: rockRmsUrl
+            }
         });
+
     } catch (error) {
-        await logError('OAuth callback failed', error);
-        res.status(500).json({ 
-            error: 'OAuth callback failed',
+        console.error('Verification error:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error during verification',
             message: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
+});
+
+// Simple test endpoint
+app.get('/test', (req, res) => {
+    res.json({ status: 'ok' });
 });
 
 // Admin routes (protected by basic auth)

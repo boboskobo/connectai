@@ -3,8 +3,6 @@ import { logError } from './logger.js';
 const requiredEnvVars = [
     'NODE_ENV',
     'PORT',
-    'GHL_APP_CLIENT_ID',
-    'GHL_APP_CLIENT_SECRET',
     'GHL_WEBHOOK_SECRET',
     'CORS_ORIGIN',
     'RATE_LIMIT_WINDOW_MS',

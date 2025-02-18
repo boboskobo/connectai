@@ -19,17 +19,13 @@ git commit -m "Deployment: $(date)"
 echo -e "${GREEN}Pushing to repository...${NC}"
 git push origin main
 
-# SSH into server and pull changes
+# SSH into server and deploy
 echo -e "${GREEN}Deploying to server...${NC}"
-ssh u166621223@connectai.click "cd /home/u166621223/domains/connectai.click/public_html && git pull origin main"
-
-# Run any necessary post-deployment commands
-echo -e "${GREEN}Running post-deployment tasks...${NC}"
 ssh u166621223@connectai.click "cd /home/u166621223/domains/connectai.click/public_html && \
-    composer install --no-dev --optimize-autoloader && \
-    php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan view:cache && \
-    chmod -R 775 storage bootstrap/cache"
+    git pull origin main && \
+    npm ci --production && \
+    mkdir -p logs/pm2 config/churches && \
+    pm2 reload ecosystem.config.cjs --env production || pm2 start ecosystem.config.cjs --env production && \
+    pm2 save"
 
 echo -e "${YELLOW}Deployment completed!${NC}" 
