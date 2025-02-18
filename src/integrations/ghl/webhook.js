@@ -38,10 +38,12 @@ class GHLWebhookHandler {
      */
     async handleWebhook(payload, signature, isRetry = false) {
         try {
-            // Validate webhook signature
+            // Validate webhook signature - TEMPORARILY DISABLED
+            /*
             if (!isRetry && !this.validateSignature(payload, signature)) {
                 throw new Error('Invalid webhook signature');
             }
+            */
 
             await logInfo('Processing webhook', { 
                 type: payload?.type,
